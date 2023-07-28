@@ -52,6 +52,7 @@ class TestBundleBuilder(unittest.TestCase):
         )
         builder.attribute("input_channels", 1)
         builder.attribute("output_channels", 3)
+        builder.attribute("modelname", "model.pt")
         builder.add_sectioned_item(
             "network_def",
             "SegResNet",
@@ -121,7 +122,18 @@ class TestBundleBuilder(unittest.TestCase):
                 "num_samples": 1,
             },
         )
-
+        builder.add_postprocessing_transform(
+            "Activationsd", {"keys": "pred", "softmax": True}
+        )
+        builder.add_postprocessing_transform(
+            "AsDiscreted",
+            {
+                "keys": ["pred", "label"],
+                "argmax": [True, False],
+                "to_onehot": "@output_channels",
+            },
+        )
+        # ========= CREATE TRAIN ITEMS (dataset, dataloader, inferer, metric, handler, trainer ) =========
         builder.add_train_item(
             "dataset",
             "Dataset",
@@ -141,17 +153,6 @@ class TestBundleBuilder(unittest.TestCase):
             },
         )
         builder.add_train_item("inferer", "SimpleInferer", {})
-        builder.add_postprocessing_transform(
-            "Activationsd", {"keys": "pred", "softmax": True}
-        )
-        builder.add_postprocessing_transform(
-            "AsDiscreted",
-            {
-                "keys": ["pred", "label"],
-                "argmax": [True, False],
-                "to_onehot": "@output_channels",
-            },
-        )
 
         with builder.get_section_builder("train") as train_builder:
             with train_builder.node("key_metric") as section_builder:
@@ -164,20 +165,20 @@ class TestBundleBuilder(unittest.TestCase):
                         },
                     )
 
-        # builder.add_section_handler(
-        #     "train",
-        #     "ValidationHandler",
-        #     {
-        #         "validator": "@validate#evaluator",
-        #         "epoch_level": True,
-        #         "interval": "@val_interval",
-        #     },
-        # )
+        builder.add_section_handler(
+            "train",
+            "ValidationHandler",
+            {
+                "validator": "@validate#evaluator",
+                "epoch_level": True,
+                "interval": "@val_interval",
+            },
+        )
         builder.add_section_handler(
             "train",
             "StatsHandler",
             {
-                "tag_name": "train_loss",
+                "tag_name": "train/loss",
                 "output_transform": "$monai.handlers.from_engine(['loss'], first=True)",
             },
         )
@@ -186,7 +187,7 @@ class TestBundleBuilder(unittest.TestCase):
             "TensorBoardStatsHandler",
             {
                 "log_dir": "@output_dir",
-                "tag_name": "train_loss",
+                "tag_name": "train/loss",
                 "output_transform": "$monai.handlers.from_engine(['loss'], first=True)",
             },
         )
@@ -207,6 +208,88 @@ class TestBundleBuilder(unittest.TestCase):
             },
         )
 
+        # ========= CREATE VALIDATE ITEMS (dataset, dataloader, inferer, metric, handler, trainer ) =========
+
+        builder.add_validate_item(
+            "dataset",
+            "Dataset",
+            {
+                "data": "$[{'image': i, 'label': l} for i, l in zip(@images[:4], @labels[:4])]",
+                "transform": "@validate#preprocessing",
+            },
+        )
+        builder.add_validate_item(
+            "dataloader",
+            "DataLoader",
+            {
+                "dataset": "@validate#dataset",
+                "batch_size": "@batch_size",
+                "shuffle": True,
+                "num_workers": 4,
+            },
+        )
+        builder.add_validate_item(
+            "inferer",
+            "SlidingWindowInferer",
+            {"roi_size": "@patch_size", "sw_batch_size": 1, "overlap": 0.25},
+        )
+
+        with builder.get_section_builder("validate") as validate_builder:
+            with validate_builder.node("key_metric") as section_builder:
+                with section_builder.node("validate/mean_dice") as subsection_builder:
+                    builder._add_item(
+                        subsection_builder,
+                        "MeanDice",
+                        {
+                            "include_background": False,
+                            "output_transform": "$monai.handlers.from_engine(['pred', 'label'])",
+                        },
+                    )
+        with builder.get_section_builder("validate") as validate_builder:
+            with validate_builder.node("additional_metrics") as section_builder:
+                with section_builder.node("validate/accuracy") as subsection_builder:
+                    builder._add_item(
+                        subsection_builder,
+                        "ignite.metrics.Accuracy",
+                        {
+                            "output_transform": "$monai.handlers.from_engine(['pred', 'label'])"
+                        },
+                    )
+
+        builder.add_section_handler(
+            "validate", "StatsHandler", {"iteration_log": False}
+        )
+        builder.add_section_handler(
+            "validate",
+            "TensorBoardStatsHandler",
+            {"log_dir": "@output_dir", "iteration_log": False},
+        )
+        builder.add_section_handler(
+            "validate",
+            "CheckpointSaver",
+            {
+                "save_dir": "@ckpt_dir",
+                "save_dict": {"model": "@network"},
+                "save_key_metric": True,
+                "key_metric_filename": "@modelname",
+            },
+        )
+        builder.add_validate_item(
+            "evaluator",
+            "SupervisedEvaluator",
+            {
+                "device": "@device",
+                "val_data_loader": "@validate#dataloader",
+                "network": "@network",
+                "inferer": "@validate#inferer",
+                "postprocessing": "@validate#postprocessing",
+                "key_val_metric": "@validate#key_metric",
+                "additional_metrics": "@validate#additional_metrics",
+                "val_handlers": "@validate#handlers",
+            },
+        )
+        # ========= CREATE RUN COMMANDS =========
+
         builder.attribute(
             "initialize",
             [
@@ -214,6 +297,8 @@ class TestBundleBuilder(unittest.TestCase):
                 "$setattr(torch.backends.cudnn, 'enabled', False)",
             ],
         )
+        builder.attribute("evaluate", ["$@validate#evaluator.run()"])
+
         builder.attribute("run", ["$@train#trainer.run()"])
         builder.build()
 

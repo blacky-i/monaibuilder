@@ -113,11 +113,60 @@ class BundleBuilder(object):
             with train_builder.node(section_name) as section_builder:
                 self._add_item(section_builder, name, vargs)
 
-    def add_deterministic_transform(self, name: str, vargs: Dict[str, Any]):
-        with self.builder.node("train") as train_builder:
-            with train_builder.nodes("deterministic_transforms") as add_transform:
-                with add_transform() as transform_builder:
-                    self._add_item(transform_builder, name, vargs)
+    def add_validate_item(self, section_name: str, name: str, vargs: Dict[str, Any]):
+        """
+        Adds composite section to validate section::
+
+        {
+            "validate": {
+                "dataset": {
+                    "_target_": CacheDataset
+                    ...
+                }
+            }
+        }
+
+        builder.add_validate_item("dataset", "CacheDataset", {})
+        """
+        with self.builder.node("validate") as validate_builder:
+            with validate_builder.node(section_name) as section_builder:
+                self._add_item(section_builder, name, vargs)
+
+    def add_deterministic_transform(
+        self,
+        name: str,
+        vargs: Dict[str, Any],
+        is_train: bool = True,
+        is_validate: bool = True,
+    ):
+        """
+        Adds preprocessing transform to train and/or validate section
+        """
+        train_transform_index: int = 0
+        if is_train:
+            with self.builder.node("train") as train_builder:
+                with train_builder.nodes("deterministic_transforms") as add_transform:
+                    train_transform_index = len(
+                        train_builder._data["deterministic_transforms"]
+                    )
+                    with add_transform() as transform_builder:
+                        self._add_item(transform_builder, name, vargs)
+
+        if is_train and is_validate:
+            with self.builder.node("validate") as validate_builder:
+                if not validate_builder.is_exist_node("deterministic_transforms"):
+                    validate_builder._data["deterministic_transforms"] = []
+                validate_builder.append_value(
+                    "deterministic_transforms",
+                    f"@train#deterministic_transforms#{train_transform_index}",
+                )
+        elif is_validate:
+            with self.builder.node("validate") as validate_builder:
+                with validate_builder.nodes(
+                    "deterministic_transforms"
+                ) as add_transform:
+                    with add_transform() as transform_builder:
+                        self._add_item(transform_builder, name, vargs)
 
     def add_random_transform(self, name: str, vargs: Dict[str, Any]):
         with self.builder.node("train") as train_builder:
@@ -125,11 +174,40 @@ class BundleBuilder(object):
                 with add_transform() as transform_builder:
                     self._add_item(transform_builder, name, vargs)
 
-    def add_postprocessing_transform(self, name: str, vargs: Dict[str, Any]):
-        with self.builder.node("train") as train_builder:
-            with train_builder.nodes("postprocessing_transforms") as add_transform:
-                with add_transform() as transform_builder:
-                    self._add_item(transform_builder, name, vargs)
+    def add_postprocessing_transform(
+        self,
+        name: str,
+        vargs: Dict[str, Any],
+        is_train: bool = True,
+        is_validate: bool = True,
+    ):
+        """
+        Adds postprocessing transform to train and/or validate section
+        """
+        train_transform_index: int = 0
+        if is_train:
+            with self.builder.node("train") as train_builder:
+                with train_builder.nodes("postprocessing_transforms") as add_transform:
+                    train_transform_index = len(
+                        train_builder._data["postprocessing_transforms"]
+                    )
+                    with add_transform() as transform_builder:
+                        self._add_item(transform_builder, name, vargs)
+        if is_train and is_validate:
+            with self.builder.node("validate") as validate_builder:
+                if not validate_builder.is_exist_node("postprocessing_transforms"):
+                    validate_builder._data["postprocessing_transforms"] = []
+                validate_builder.append_value(
+                    "postprocessing_transforms",
+                    f"@train#postprocessing_transforms#{train_transform_index}",
+                )
+        elif is_validate:
+            with self.builder.node("validate") as validate_builder:
+                with validate_builder.nodes(
+                    "postprocessing_transforms"
+                ) as add_transform:
+                    with add_transform() as transform_builder:
+                        self._add_item(transform_builder, name, vargs)
 
     def add_section_handler(self, section_name: str, name: str, vargs: Dict[str, Any]):
         with self.builder.node(section_name) as section_builder:
@@ -231,37 +309,118 @@ class BundleBuilder(object):
                 f"do not exists in train section"
             )
 
+    def set_validate_section(
+        self, config: ExtendedSpytulaBuilder = ExtendedSpytulaBuilder()
+    ) -> None:
+        """
+        Add validate section to configuration.
+        Must contain following section::
+        {
+            "preprocessing":{
+                ...
+            },
+            "dataset": {
+                ...
+            },
+            "dataloader": {
+                ...
+            },
+            "inferer":{
+                ...
+            },
+            "postprocessing":{
+                ...
+            },
+            "handlers": [
+                ...
+            ],
+            "key_metric": {
+                ...
+            },
+            "additional_metrics": {
+                ...
+            },
+            "evaluator" : {
+            "_target_": "SupervisedEvaluator",
+            "device": "@device",
+            "val_data_loader": "@validate#dataloader",
+            "network": "@network",
+            "inferer": "@validate#inferer",
+            "postprocessing": "@validate#postprocessing",
+            "key_val_metric": "@validate#key_metric",
+            "additional_metrics": "@validate#additional_metrics",
+            "val_handlers": "@validate#handlers"
+            }
+        }
+        """
+
+        _check_keys = [
+            "preprocessing",
+            "postprocessing",
+            "dataset",
+            "dataloader",
+            "handlers",
+            "key_metric",
+            "evaluator",
+            "inferer",
+        ]
+        with self.builder.node("validate") as validate_config:
+            if not validate_config.is_exist_node("deterministic_transforms"):
+                validate_config.attribute("deterministic_transforms", list())
+            validate_config.attribute(
+                "preprocessing",
+                {
+                    "_target_": "Compose",
+                    "transforms": "$@validate#deterministic_transforms",
+                },
+            )
+
+            validate_config.attribute(
+                "postprocessing",
+                {
+                    "_target_": "Compose",
+                    "transforms": "$@validate#postprocessing_transforms",
+                },
+            )
+            if not validate_config.is_exist_node("additional_metrics"):
+                validate_config.attribute("additional_metrics", list())
+
+            checks = []
+            for current_key in _check_keys:
+                checks.append(current_key in validate_config._data.keys())
+            assert all(checks), (
+                f"keys '{[k for v,k in zip(checks, _check_keys) if not v ]}' "
+                f"do not exists in validate section"
+            )
+
     def generate_logging_conf(self) -> None:
         os.makedirs(self.bundle_root, exist_ok=True)
         os.makedirs(self.configs_path, exist_ok=True)
 
-        logfile = """[loggers]
-keys=root
-
-[handlers]
-keys=consoleHandler
-
-[formatters]
-keys=fullFormatter
-
-[logger_root]
-level=INFO
-handlers=consoleHandler
-
-[handler_consoleHandler]
-class=StreamHandler
-level=INFO
-formatter=fullFormatter
-args=(sys.stdout,)
-
-[formatter_fullFormatter]
-format=%(asctime)s - %(name)s - %(levelname)s - %(message)s"""
-
+        logfile = (
+            "[loggers]\n"
+            "keys=root\n\n"
+            "[handlers]\n"
+            "keys=consoleHandler\n\n"
+            "[formatters]\n"
+            "keys=fullFormatter\n\n"
+            "[logger_root]\n"
+            "level=INFO\n"
+            "handlers=consoleHandler\n\n"
+            "[handler_consoleHandler]\n"
+            "class=StreamHandler\n"
+            "level=INFO\n"
+            "formatter=fullFormatter\n"
+            "args=(sys.stdout,)\n\n"
+            "[formatter_fullFormatter]\n"
+            "format=%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
         with open(self.configs_path / "logging.conf", "w") as f:
             f.write(logfile)
 
     def build(self) -> None:
         self.set_train_section(ExtendedSpytulaBuilder())
+        self.set_validate_section(ExtendedSpytulaBuilder())
         self.generate_logging_conf()
         # Configure the key to use underscorecase
         os.makedirs(self.bundle_root, exist_ok=True)

@@ -41,6 +41,12 @@ class ExtendedSpytulaBuilder(SpytulaBuilder):
         """
         return type(self)()
 
+    def append_value(self, key: str, value: Any) -> None:
+        """
+        Appends value to key in dictionary. Expected that key is List
+        """
+        self._data[key].append(value)
+
     @contextmanager
     def node(self, key: str) -> Generator[ExtendedSpytulaBuilder, None, None]:
         """
