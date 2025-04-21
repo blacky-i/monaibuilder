@@ -72,6 +72,10 @@ class BundleBuilder(object):
         self.configs_path = self.bundle_root / "configs"
         self.docs_path = self.bundle_root / "docs"
         self.scripts_path = self.bundle_root / "scripts"
+        self.commands_path = self.bundle_root / "commands"
+
+        self.commands_dict = {}
+
         self.builder = ExtendedSpytulaBuilder()
 
     def add_config_variable(self, name: str, value: Any):
@@ -275,7 +279,7 @@ class BundleBuilder(object):
             "dataloader",
             "postprocessing",
             "handlers",
-            "key_metric",
+            # "key_metric",
             "trainer",
             "inferer",
         ]
@@ -284,6 +288,9 @@ class BundleBuilder(object):
                 train_config.attribute("deterministic_transforms", list())
             if not train_config.is_exist_node("random_transforms"):
                 train_config.attribute("random_transforms", list())
+            if not train_config.is_exist_node("additional_metrics"):
+                train_config.attribute("additional_metrics", list())
+
             train_config.attribute(
                 "preprocessing",
                 {
@@ -299,7 +306,6 @@ class BundleBuilder(object):
                     "transforms": "$@train#postprocessing_transforms",
                 },
             )
-            train_config.attribute("additional_metrics", list())
 
             checks = []
             for current_key in _check_keys:
@@ -394,7 +400,6 @@ class BundleBuilder(object):
             )
 
     def generate_logging_conf(self) -> None:
-        os.makedirs(self.bundle_root, exist_ok=True)
         os.makedirs(self.configs_path, exist_ok=True)
 
         logfile = (
@@ -418,10 +423,22 @@ class BundleBuilder(object):
         with open(self.configs_path / "logging.conf", "w") as f:
             f.write(logfile)
 
-    def build(self) -> None:
-        self.set_train_section(ExtendedSpytulaBuilder())
-        self.set_validate_section(ExtendedSpytulaBuilder())
-        self.generate_logging_conf()
+    def generate_commands(self, commands_dict: Dict[str, str]) -> None:
+        os.makedirs(self.commands_path, exist_ok=True)
+
+        for k, v in commands_dict.items():
+            with open(self.commands_path / k, "w") as f:
+                f.write(v)
+
+    def set_commands(self, commands_dict: Dict[str, str]) -> None:
+        self.commands_dict = commands_dict
+
+    def build(self, filename: str = "train.json", skip_sections: bool = False) -> None:
+        if not skip_sections:
+            self.set_train_section(ExtendedSpytulaBuilder())
+            self.set_validate_section(ExtendedSpytulaBuilder())
+            self.generate_logging_conf()
+            self.generate_commands(self.commands_dict)
         # Configure the key to use underscorecase
         os.makedirs(self.bundle_root, exist_ok=True)
         os.makedirs(self.configs_path, exist_ok=True)
@@ -430,8 +447,25 @@ class BundleBuilder(object):
 
         self.builder.key_format(underscore=True)
         json_output = self.builder.to_json(indent=4)
-        with open(self.configs_path / "train.json", "w") as f:
+        with open(self.configs_path / filename, "w") as f:
+            f.write(json_output)
+    
+    def build_yaml(self, filename: str = "train.yaml", skip_sections: bool = False) -> None:
+        if not skip_sections:
+            self.set_train_section(ExtendedSpytulaBuilder())
+            self.set_validate_section(ExtendedSpytulaBuilder())
+            self.generate_logging_conf()
+            self.generate_commands(self.commands_dict)
+        # Configure the key to use underscorecase
+        os.makedirs(self.bundle_root, exist_ok=True)
+        os.makedirs(self.configs_path, exist_ok=True)
+        os.makedirs(self.docs_path, exist_ok=True)
+        os.makedirs(self.scripts_path, exist_ok=True)
+
+        self.builder.key_format(underscore=True)
+        json_output = self.builder.to_yaml(indent=2)
+        with open(self.configs_path / filename, "w") as f:
             f.write(json_output)
 
-        logger = get_logger(self.__class__.__name__)
-        logger.info(json_output)
+        # logger = get_logger(self.__class__.__name__)
+        # logger.info(json_output)

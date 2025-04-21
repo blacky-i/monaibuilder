@@ -13,7 +13,7 @@ classifiers = [
     "Topic :: File Formats :: JSON"
 ]
 [tool.poetry.dependencies]
-python = ">=3.8.1,<3.11"
+python = ">=3.8.1,<4.0.0"
 monai = "^1.2.0"
 spytula = "^0.0.3"
 
