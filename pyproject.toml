@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "monaibuilder"
-version = "0.1.0"
+version = "0.1.1"
 description = "Automative package for monai bundle creation"
 authors = ["Chernenkiy Ivan"]
 license = "Apache-2.0"
@@ -14,7 +14,6 @@ classifiers = [
 ]
 [tool.poetry.dependencies]
 python = ">=3.8.1,<4.0.0"
-monai = "^1.2.0"
 spytula = "^0.0.3"
 
 [tool.poetry.group.dev.dependencies]
@@ -24,6 +23,9 @@ black = "^23.7.0"
 pylint = "^2.17.4"
 pytype = "^2023.7.21"
 mypy = "^1.4.1"
+monai = "^1.2.0"
+torch = ">=2.0.0, !=2.0.1, !=2.1.0"
+nibabel = "5.2"
 
 [build-system]
 requires = ["poetry-core"]

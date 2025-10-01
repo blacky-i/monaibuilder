@@ -12,8 +12,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, Generator, List
+from typing import Any, Callable, Dict, Generator, Iterable, List
 
+import inflection
 from spytula.builder import SpytulaBuilder
 
 
@@ -28,6 +29,35 @@ class ExtendedSpytulaBuilder(SpytulaBuilder):
         extended_builder._data = builder._data
         extended_builder._root = builder._root
         return extended_builder
+
+    def _format_key(self, key: str) -> str:
+        """
+        Format the key based on the configured key formatting options.
+
+        Args:
+            key (str): The key to format.
+
+        Returns:
+            str: Formatted key.
+        """
+        isUpperFirst = False
+        if str(key[0]).isupper():
+            isUpperFirst = True
+        if self._key_format:
+            for format_option, format_args in self._key_format.items():
+                key_formatter = getattr(inflection, format_option, None)
+                if key_formatter is not None:
+                    if type(format_args) is dict:
+                        key = key_formatter(key, **format_args)
+                    elif isinstance(format_args, Iterable):
+                        key = key_formatter(key, *format_args)
+                    elif format_args is True:
+                        key = key_formatter(key)
+
+        if isUpperFirst:
+            return key[0].upper() + key[1:]
+        else:
+            return key
 
     def is_exist_node(self, key: str) -> bool:
         return key in self._data.keys()

@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any, Dict, Union
 
 from .extended_spytula_builder import ExtendedSpytulaBuilder
-from .utils.utils import get_logger
 
 
 class BundleBuilder(object):
@@ -449,8 +448,10 @@ class BundleBuilder(object):
         json_output = self.builder.to_json(indent=4)
         with open(self.configs_path / filename, "w") as f:
             f.write(json_output)
-    
-    def build_yaml(self, filename: str = "train.yaml", skip_sections: bool = False) -> None:
+
+    def build_yaml(
+        self, filename: str = "train.yaml", skip_sections: bool = False
+    ) -> None:
         if not skip_sections:
             self.set_train_section(ExtendedSpytulaBuilder())
             self.set_validate_section(ExtendedSpytulaBuilder())
